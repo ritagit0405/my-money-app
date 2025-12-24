@@ -4,8 +4,24 @@ import pandas as pd
 import datetime
 import plotly.express as px
 
-# --- 1. 基本設定 ---
+# --- 1. 基本設定與 CSS 字體優化 ---
 st.set_page_config(page_title="專業雲端帳本分析", layout="wide")
+
+# 加入 CSS 調整字體大小
+st.markdown("""
+    <style>
+    /* 統計卡片數字大小 */
+    [data-testid="stMetricValue"] {
+        font-size: 32px !important;
+        font-weight: bold;
+    }
+    /* 表格內的文字大小 */
+    .stDataFrame div {
+        font-size: 16px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 st.title("💰 雲端收支管理與分析系統")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -16,6 +32,8 @@ def load_data():
         data['日期'] = pd.to_datetime(data['日期'], errors='coerce')
         data = data.dropna(subset=['日期'])
         data = data.sort_values(by="日期", ascending=True).reset_index(drop=True)
+        # 確保金額欄位為數值型態
+        data['金額'] = pd.to_numeric(data['金額'], errors='coerce').fillna(0)
         return data
     except Exception as e:
         return pd.DataFrame(columns=["日期", "分類項目", "收支類型", "金額", "結餘", "支出方式", "備註"])
@@ -45,11 +63,8 @@ with st.expander("➕ 新增一筆紀錄"):
             "支出方式": pay_method,
             "備註": note
         }])
-        
         updated_df = pd.concat([df, new_entry], ignore_index=True)
-        updated_df['日期'] = pd.to_datetime(updated_df['日期'])
-        updated_df['日期'] = updated_df['日期'].dt.strftime('%Y-%m-%d')
-        
+        updated_df['日期'] = pd.to_datetime(updated_df['日期']).dt.strftime('%Y-%m-%d')
         conn.update(data=updated_df)
         st.success("✅ 資料已同步！")
         st.rerun()
@@ -68,8 +83,6 @@ if not df.empty:
                      color_discrete_sequence=px.colors.qualitative.Pastel)
         fig.update_traces(textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info(f"{current_year} 年目前尚無支出資料。")
 
     st.markdown("---")
 
@@ -79,17 +92,16 @@ if not df.empty:
     all_months = sorted(df['日期'].dt.strftime('%Y-%m').unique(), reverse=True)
     history_month = st.selectbox("🔍 選擇月份查看明細", all_months, key="history_month_sel")
     
-    # 篩選資料
     history_df = df[df['日期'].dt.strftime('%Y-%m') == history_month].copy()
     year_df = df[df['日期'].dt.year == int(history_month[:4])].copy()
     
-    # 計算數據
+    # 計算統計數據
     m_income = history_df[history_df["收支類型"] == "收入"]["金額"].sum()
     m_expense = history_df[history_df["收支類型"] == "支出"]["金額"].sum()
     y_income = year_df[year_df["收支類型"] == "收入"]["金額"].sum()
     y_expense = year_df[year_df["收支類型"] == "支出"]["金額"].sum()
 
-    # 顯示統計卡片
+    # 顯示統計卡片 (千分位且無小數點)
     st.subheader(f"📅 {history_month} 財務摘要")
     c_m1, c_m2, c_m3 = st.columns(3)
     c_m1.metric("💰 當月總收入", f"{m_income:,.0f} 元")
@@ -104,31 +116,29 @@ if not df.empty:
 
     st.markdown("---")
     
-    # --- 5. Tiffany 藍字呈現邏輯 ---
-    def highlight_income(row):
-        # Tiffany 藍色代碼為 #81D8D0
+    # --- 5. 表格樣式優化 (Tiffany 藍 + 格式化金額) ---
+    def style_dataframe(row):
+        # 收入顯示 Tiffany 藍 (#81D8D0)
         color = '#81D8D0' if row['收支類型'] == '收入' else ''
         return [f'color: {color}' for _ in row]
 
     display_df = history_df.copy()
     display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
     
-    # 使用 Style 套用顏色
-    styled_df = display_df.style.apply(highlight_income, axis=1)
+    # 移除「日期_dt」等暫存欄位 (如有)
+    if '日期_dt' in display_df.columns:
+        display_df = display_df.drop(columns=['日期_dt'])
+
+    # 套用樣式與格式化 (金額與結餘加入千分位、無小數點)
+    styled_df = display_df.style.apply(style_dataframe, axis=1).format({
+        "金額": "{:,.0f}",
+        "結餘": "{:,.0f}"
+    })
+    
     st.dataframe(styled_df, use_container_width=True)
     
     # 刪除功能
     with st.expander("🗑️ 刪除單筆紀錄"):
         if not display_df.empty:
             row_to_del_idx = st.number_input("輸入欲刪除的編號 (表格左側 index)", 
-                                            min_value=int(display_df.index.min()), 
-                                            max_value=int(display_df.index.max()), 
-                                            step=1)
-            if st.button("⚠️ 確認刪除資料"):
-                df_final = df.drop(row_to_del_idx).reset_index(drop=True)
-                df_final['日期'] = df_final['日期'].dt.strftime('%Y-%m-%d')
-                conn.update(data=df_final)
-                st.warning("資料已移除。")
-                st.rerun()
-else:
-    st.info("尚無數據。")
+                                            min_value=int(display_df.index.min
