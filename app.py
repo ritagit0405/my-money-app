@@ -30,7 +30,7 @@ with st.expander("➕ 新增一筆紀錄"):
     with col1:
         date_val = st.date_input("選擇日期", datetime.date.today())
         type_option = st.selectbox("收入/支出", ["支出", "收入"])
-        category_list = ["飲食", "交通", "購物", "住房", "娛樂", "稅金", "電信費", "醫療費", "其他", "孝親費"] if type_option == "支出" else ["薪資", "獎金", "投資", "失業補助", "其他"]
+        category_list = ["飲食", "交通", "購物", "住房", "教育", "娛樂", "其他", "孝親費"] if type_option == "支出" else ["薪資", "獎金", "投資", "其他"]
         category = st.selectbox("分類項目", category_list)
     with col2:
         amount = st.number_input("金額 (TWD)", min_value=0, step=1)
@@ -48,10 +48,8 @@ with st.expander("➕ 新增一筆紀錄"):
             "備註": note
         }])
         
-        # 合併資料
+        # 合併資料並統一格式
         updated_df = pd.concat([df, new_entry], ignore_index=True)
-        
-        # --- 修正點：先統一轉為 datetime，再格式化為字串存檔 ---
         updated_df['日期'] = pd.to_datetime(updated_df['日期'])
         updated_df['日期'] = updated_df['日期'].dt.strftime('%Y-%m-%d')
         
@@ -61,74 +59,88 @@ with st.expander("➕ 新增一筆紀錄"):
 
 st.markdown("---")
 
-# --- 3. 數據分析區域 (每月總支出折線圖) ---
+# --- 3. 數據分析區域 (年度支出佔比圓餅圖) ---
 if not df.empty:
-    st.header("📈 每月支出趨勢分析")
+    st.header("📊 年度支出結構分析")
     
-    expense_df = df[df["收支類型"] == "支出"].copy()
+    # 篩選年度支出資料
+    current_year = datetime.date.today().year
+    year_expense_df = df[(df["收支類型"] == "支出") & (df['日期'].dt.year == current_year)].copy()
     
-    if not expense_df.empty:
-        # 建立月份標籤
-        expense_df['月份'] = expense_df['日期'].dt.strftime('%Y-%m')
-        # 按月加總
-        monthly_trend = expense_df.groupby("月份", as_index=False)["金額"].sum()
-        monthly_trend = monthly_trend.sort_values("月份")
+    if not year_expense_df.empty:
+        # 按分類加總
+        pie_data = year_expense_df.groupby("分類項目", as_index=False)["金額"].sum()
         
-        # 繪製折線圖
-        fig = px.line(
-            monthly_trend, 
-            x="月份", 
-            y="金額", 
-            title="每月總支出趨勢 (TWD)",
-            markers=True,
-            text="金額"
+        # 繪製圓餅圖
+        fig = px.pie(
+            pie_data, 
+            values='金額', 
+            names='分類項目', 
+            title=f"{current_year} 年度支出佔比",
+            hole=0.4, # 空心圓餅圖
+            color_discrete_sequence=px.colors.qualitative.Pastel
         )
-        fig.update_traces(textposition="top center", line_color="#EF553B")
+        fig.update_traces(textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("尚無支出資料。")
+        st.info(f"{current_year} 年目前尚無支出資料。")
 
     st.markdown("---")
 
-    # --- 4. 歷史紀錄管理 (獨立篩選月份) ---
-    st.header("🗂️ 歷史紀錄管理")
+    # --- 4. 歷史紀錄管理與財務統計 ---
+    st.header("🗂️ 歷史紀錄與財務統計")
     
+    # 月份選擇器
     all_months = sorted(df['日期'].dt.strftime('%Y-%m').unique(), reverse=True)
-    if all_months:
-        history_month = st.selectbox("🔍 選擇月份查看明細", all_months, key="history_month_sel")
-        
-        history_df = df[df['日期'].dt.strftime('%Y-%m') == history_month].copy()
-        
-        # 計算統計卡片
-        total_income = history_df[history_df["收支類型"] == "收入"]["金額"].sum()
-        total_expense = history_df[history_df["收支類型"] == "支出"]["金額"].sum()
-        monthly_balance = total_income - total_expense
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("💰 當月總收入", f"{total_income:,.0f} 元")
-        c2.metric("💸 當月總支出", f"{total_expense:,.0f} 元", delta=f"-{total_expense:,.0f}", delta_color="inverse")
-        c3.metric("⚖️ 本月結餘", f"{monthly_balance:,.0f} 元", delta=f"{monthly_balance:,.0f}")
+    history_month = st.selectbox("🔍 選擇月份查看明細", all_months, key="history_month_sel")
+    
+    # 篩選選定月份與當年度資料
+    history_df = df[df['日期'].dt.strftime('%Y-%m') == history_month].copy()
+    year_df = df[df['日期'].dt.year == int(history_month[:4])].copy()
+    
+    # 計算統計數據 (當月)
+    m_income = history_df[history_df["收支類型"] == "收入"]["金額"].sum()
+    m_expense = history_df[history_df["收支類型"] == "支出"]["金額"].sum()
+    m_balance = m_income - m_expense
+    
+    # 計算統計數據 (當年度)
+    y_income = year_df[year_df["收支類型"] == "收入"]["金額"].sum()
+    y_expense = year_df[year_df["收支類型"] == "支出"]["金額"].sum()
+    y_balance = y_income - y_expense
+    
+    # 顯示財務卡片
+    st.subheader(f"📅 {history_month} 財務摘要")
+    col_m1, col_m2, col_m3 = st.columns(3)
+    col_m1.metric("💰 當月總收入", f"{m_income:,.0f} 元")
+    col_m2.metric("💸 當月總支出", f"{m_expense:,.0f} 元", delta=f"-{m_expense:,.0f}", delta_color="inverse")
+    col_m3.metric("⚖️ 本月結餘", f"{m_balance:,.0f} 元")
 
-        # 表格顯示
-        display_df = history_df.copy()
-        display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
-        st.dataframe(display_df, use_container_width=True)
-        
-        # 刪除功能
-        with st.expander("🗑️ 刪除單筆紀錄"):
+    st.subheader(f"🗓️ {history_month[:4]} 年度累計統計")
+    col_y1, col_y2, col_y3 = st.columns(3)
+    col_y1.metric("📈 當年度總收入", f"{y_income:,.0f} 元")
+    col_y2.metric("📉 當年度總支出", f"{y_expense:,.0f} 元", delta=f"-{y_expense:,.0f}", delta_color="inverse")
+    col_y3.metric("🏛️ 當年度總結餘", f"{y_balance:,.0f} 元")
+
+    st.markdown("---")
+    
+    # 表格顯示
+    display_df = history_df.copy()
+    display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
+    st.dataframe(display_df, use_container_width=True)
+    
+    # 刪除功能
+    with st.expander("🗑️ 刪除單筆紀錄"):
+        if not display_df.empty:
             row_to_del_idx = st.number_input("輸入欲刪除的編號 (表格最左側 index)", 
                                             min_value=int(display_df.index.min()), 
                                             max_value=int(display_df.index.max()), 
                                             step=1)
             
-            if st.button("⚠️ 確認刪除資料"):
+            if st.button("⚠️ 確認刪除此筆資料"):
                 df_final = df.drop(row_to_del_idx).reset_index(drop=True)
                 df_final['日期'] = df_final['日期'].dt.strftime('%Y-%m-%d')
                 conn.update(data=df_final)
                 st.warning("資料已移除。")
                 st.rerun()
 else:
-    st.info("目前雲端尚無數據。")
-
-
-
+    st.info("尚無數據。")
