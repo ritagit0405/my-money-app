@@ -13,6 +13,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def load_data():
     try:
         data = conn.read(ttl=0)
+        # 強制轉換日期格式，不符合的會變成 NaT
         data['日期'] = pd.to_datetime(data['日期'], errors='coerce')
         data = data.dropna(subset=['日期'])
         # 初始排序：由舊到新
@@ -46,8 +47,14 @@ with st.expander("➕ 新增一筆紀錄"):
             "支出方式": pay_method,
             "備註": note
         }])
+        
+        # 合併資料
         updated_df = pd.concat([df, new_entry], ignore_index=True)
+        
+        # --- 修正點：先統一轉為 datetime，再格式化為字串存檔 ---
+        updated_df['日期'] = pd.to_datetime(updated_df['日期'])
         updated_df['日期'] = updated_df['日期'].dt.strftime('%Y-%m-%d')
+        
         conn.update(data=updated_df)
         st.success("✅ 資料已同步！")
         st.rerun()
@@ -58,16 +65,13 @@ st.markdown("---")
 if not df.empty:
     st.header("📈 每月支出趨勢分析")
     
-    # 準備折線圖數據：篩選支出類型
     expense_df = df[df["收支類型"] == "支出"].copy()
     
     if not expense_df.empty:
-        # 建立「月份」欄位用於群組
+        # 建立月份標籤
         expense_df['月份'] = expense_df['日期'].dt.strftime('%Y-%m')
-        
-        # 按月份加總支出金額
+        # 按月加總
         monthly_trend = expense_df.groupby("月份", as_index=False)["金額"].sum()
-        # 確保月份排序正確
         monthly_trend = monthly_trend.sort_values("月份")
         
         # 繪製折線圖
@@ -76,49 +80,42 @@ if not df.empty:
             x="月份", 
             y="金額", 
             title="每月總支出趨勢 (TWD)",
-            markers=True, # 顯示點
-            text="金額"   # 在點上面顯示數字
+            markers=True,
+            text="金額"
         )
-        
-        # 優化圖表外觀
         fig.update_traces(textposition="top center", line_color="#EF553B")
-        fig.update_layout(xaxis_title="月份", yaxis_title="總支出金額")
-        
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("目前尚無支出資料可生成趨勢圖。")
+        st.info("尚無支出資料。")
 
     st.markdown("---")
 
     # --- 4. 歷史紀錄管理 (獨立篩選月份) ---
     st.header("🗂️ 歷史紀錄管理")
     
-    # 獲取所有可用的月份供選擇
     all_months = sorted(df['日期'].dt.strftime('%Y-%m').unique(), reverse=True)
-    history_month = st.selectbox("🔍 選擇月份查看明細", all_months, key="history_month_sel")
-    
-    # 根據選定月份篩選
-    history_df = df[df['日期'].dt.strftime('%Y-%m') == history_month].copy()
-    
-    # 計算該月統計數據
-    total_income = history_df[history_df["收支類型"] == "收入"]["金額"].sum()
-    total_expense = history_df[history_df["收支類型"] == "支出"]["金額"].sum()
-    monthly_balance = total_income - total_expense
-    
-    # 顯示財務統計卡片
-    c1, c2, c3 = st.columns(3)
-    c1.metric("💰 當月總收入", f"{total_income:,.0f} 元")
-    c2.metric("💸 當月總支出", f"{total_expense:,.0f} 元", delta=f"-{total_expense:,.0f}", delta_color="inverse")
-    c3.metric("⚖️ 本月結餘", f"{monthly_balance:,.0f} 元", delta=f"{monthly_balance:,.0f}")
+    if all_months:
+        history_month = st.selectbox("🔍 選擇月份查看明細", all_months, key="history_month_sel")
+        
+        history_df = df[df['日期'].dt.strftime('%Y-%m') == history_month].copy()
+        
+        # 計算統計卡片
+        total_income = history_df[history_df["收支類型"] == "收入"]["金額"].sum()
+        total_expense = history_df[history_df["收支類型"] == "支出"]["金額"].sum()
+        monthly_balance = total_income - total_expense
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("💰 當月總收入", f"{total_income:,.0f} 元")
+        c2.metric("💸 當月總支出", f"{total_expense:,.0f} 元", delta=f"-{total_expense:,.0f}", delta_color="inverse")
+        c3.metric("⚖️ 本月結餘", f"{monthly_balance:,.0f} 元", delta=f"{monthly_balance:,.0f}")
 
-    # 顯示明細表格
-    display_df = history_df.copy()
-    display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
-    st.dataframe(display_df, use_container_width=True)
-    
-    # 刪除功能
-    with st.expander("🗑️ 刪除單筆紀錄"):
-        if not display_df.empty:
+        # 表格顯示
+        display_df = history_df.copy()
+        display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
+        st.dataframe(display_df, use_container_width=True)
+        
+        # 刪除功能
+        with st.expander("🗑️ 刪除單筆紀錄"):
             row_to_del_idx = st.number_input("輸入欲刪除的編號 (表格最左側 index)", 
                                             min_value=int(display_df.index.min()), 
                                             max_value=int(display_df.index.max()), 
@@ -128,7 +125,7 @@ if not df.empty:
                 df_final = df.drop(row_to_del_idx).reset_index(drop=True)
                 df_final['日期'] = df_final['日期'].dt.strftime('%Y-%m-%d')
                 conn.update(data=df_final)
-                st.warning("資料已成功移除。")
+                st.warning("資料已移除。")
                 st.rerun()
 else:
-    st.info("尚無數據，請先新增紀錄。")
+    st.info("目前雲端尚無數據。")
