@@ -54,31 +54,50 @@ with st.expander("➕ 新增一筆紀錄"):
 
 st.markdown("---")
 
-# --- 3. 數據分析區域 (圖表選擇月份) ---
+# --- 3. 數據分析區域 (每月總支出折線圖) ---
 if not df.empty:
-    all_months = sorted(df['日期'].dt.strftime('%Y-%m').unique(), reverse=True)
+    st.header("📈 每月支出趨勢分析")
     
-    st.header("📊 支出數據分析")
-    chart_month = st.selectbox("📅 選擇分析圖表月份", all_months, key="chart_month_sel")
+    # 準備折線圖數據：篩選支出類型
+    expense_df = df[df["收支類型"] == "支出"].copy()
     
-    chart_df = df[(df['日期'].dt.strftime('%Y-%m') == chart_month) & (df["收支類型"] == "支出")]
-    
-    if not chart_df.empty:
-        chart_data = chart_df.groupby("分類項目", as_index=False)["金額"].sum().sort_values(by="金額", ascending=False)
-        fig = px.bar(chart_data, x='分類項目', y='金額', color='分類項目', text_auto='.2s', title=f"{chart_month} 支出排行")
+    if not expense_df.empty:
+        # 建立「月份」欄位用於群組
+        expense_df['月份'] = expense_df['日期'].dt.strftime('%Y-%m')
+        
+        # 按月份加總支出金額
+        monthly_trend = expense_df.groupby("月份", as_index=False)["金額"].sum()
+        # 確保月份排序正確
+        monthly_trend = monthly_trend.sort_values("月份")
+        
+        # 繪製折線圖
+        fig = px.line(
+            monthly_trend, 
+            x="月份", 
+            y="金額", 
+            title="每月總支出趨勢 (TWD)",
+            markers=True, # 顯示點
+            text="金額"   # 在點上面顯示數字
+        )
+        
+        # 優化圖表外觀
+        fig.update_traces(textposition="top center", line_color="#EF553B")
+        fig.update_layout(xaxis_title="月份", yaxis_title="總支出金額")
+        
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info(f"{chart_month} 尚無支出紀錄。")
+        st.info("目前尚無支出資料可生成趨勢圖。")
 
     st.markdown("---")
 
     # --- 4. 歷史紀錄管理 (獨立篩選月份) ---
     st.header("🗂️ 歷史紀錄管理")
     
-    # 獨立的月份選擇器
-    history_month = st.selectbox("🔍 篩選明細月份", all_months, key="history_month_sel")
+    # 獲取所有可用的月份供選擇
+    all_months = sorted(df['日期'].dt.strftime('%Y-%m').unique(), reverse=True)
+    history_month = st.selectbox("🔍 選擇月份查看明細", all_months, key="history_month_sel")
     
-    # 根據歷史月份篩選資料
+    # 根據選定月份篩選
     history_df = df[df['日期'].dt.strftime('%Y-%m') == history_month].copy()
     
     # 計算該月統計數據
@@ -86,31 +105,30 @@ if not df.empty:
     total_expense = history_df[history_df["收支類型"] == "支出"]["金額"].sum()
     monthly_balance = total_income - total_expense
     
-    # 顯示統計卡片
+    # 顯示財務統計卡片
     c1, c2, c3 = st.columns(3)
     c1.metric("💰 當月總收入", f"{total_income:,.0f} 元")
     c2.metric("💸 當月總支出", f"{total_expense:,.0f} 元", delta=f"-{total_expense:,.0f}", delta_color="inverse")
     c3.metric("⚖️ 本月結餘", f"{monthly_balance:,.0f} 元", delta=f"{monthly_balance:,.0f}")
 
-    # 顯示表格
+    # 顯示明細表格
     display_df = history_df.copy()
     display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
     st.dataframe(display_df, use_container_width=True)
     
     # 刪除功能
-    st.subheader("🗑️ 刪除紀錄")
-    if not display_df.empty:
-        row_to_del_idx = st.number_input("輸入欲刪除的編號 (表格最左側 index)", 
-                                        min_value=int(display_df.index.min()), 
-                                        max_value=int(display_df.index.max()), 
-                                        step=1)
-        
-        if st.button("⚠️ 確認刪除此筆資料"):
-            # 從原始 df 刪除
-            df_final = df.drop(row_to_del_idx).reset_index(drop=True)
-            df_final['日期'] = df_final['日期'].dt.strftime('%Y-%m-%d')
-            conn.update(data=df_final)
-            st.warning("資料已移除。")
-            st.rerun()
+    with st.expander("🗑️ 刪除單筆紀錄"):
+        if not display_df.empty:
+            row_to_del_idx = st.number_input("輸入欲刪除的編號 (表格最左側 index)", 
+                                            min_value=int(display_df.index.min()), 
+                                            max_value=int(display_df.index.max()), 
+                                            step=1)
+            
+            if st.button("⚠️ 確認刪除資料"):
+                df_final = df.drop(row_to_del_idx).reset_index(drop=True)
+                df_final['日期'] = df_final['日期'].dt.strftime('%Y-%m-%d')
+                conn.update(data=df_final)
+                st.warning("資料已成功移除。")
+                st.rerun()
 else:
-    st.info("尚無數據。")
+    st.info("尚無數據，請先新增紀錄。")
