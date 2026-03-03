@@ -43,7 +43,7 @@ with st.expander("➕ 新增一筆紀錄"):
     with col1:
         date_val = st.date_input("選擇日期", datetime.date.today())
         type_option = st.selectbox("收入/支出", ["支出", "收入"])
-        category_list = ["飲食", "交通", "購物", "住房", "教育", "娛樂", "其他", "孝親費"] if type_option == "支出" else ["薪資", "獎金", "投資", "其他"]
+        category_list = ["飲食", "交通", "購物", "住房", "教育", "娛樂","孝親費","保險","醫療費","其他", ] if type_option == "支出" else ["失業補助","薪資", "獎金", "投資", "其他"]
         category = st.selectbox("分類項目", category_list)
     with col2:
         amount = st.number_input("金額 (TWD)", min_value=0, step=1)
@@ -155,3 +155,4 @@ if not df.empty:
                 st.rerun()
 else:
     st.info("尚無數據。")
+
